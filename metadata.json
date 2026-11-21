@@ -1,0 +1,6 @@
+{
+  "name": "Nuvora",
+  "description": "Minimalist online fashion reselling storefront for Bangladesh featuring curated womenswear, menswear, and accessories in BDT.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
