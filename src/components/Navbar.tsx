@@ -7,21 +7,19 @@ import {
   getProductCategories,
   Product,
 } from '../data/catalog';
+import {
+  getCategoryPath,
+  getNavTargetPath,
+  getProductPath,
+  NavTarget,
+} from '../utils/routes';
 import { ImageWithFallback } from './ImageWithFallback';
 
-export type NavTarget =
-  | 'home'
-  | 'shop'
-  | 'new-arrivals'
-  | 'contact'
-  | 'privacy'
-  | 'returns'
-  | 'delivery'
-  | 'terms';
+export type { NavTarget };
 
 interface NavbarProps {
   bagCount: number;
-  activeNav: NavTarget;
+  activeNav: NavTarget | null;
   searchQuery: string;
   products: Product[];
   categories: CategoryDefinition[];
@@ -111,7 +109,7 @@ export function Navbar({
       <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6 lg:gap-8 lg:px-10">
         {/* Zone 1: Brand Wordmark */}
         <a
-          href="#home"
+          href="/"
           onClick={(e) => {
             e.preventDefault();
             handleNavClick('home');
@@ -128,6 +126,7 @@ export function Navbar({
         >
           {NAV_LINKS.map((item) => {
             const isActive = activeNav === item.target;
+            const targetHref = getNavTargetPath(item.target);
             if (item.target === 'shop') {
               return (
                 <div
@@ -136,9 +135,12 @@ export function Navbar({
                   onMouseEnter={openShopDropdown}
                   onMouseLeave={scheduleCloseShopDropdown}
                 >
-                  <button
-                    type="button"
-                    onClick={() => handleNavClick('shop')}
+                  <a
+                    href={targetHref}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNavClick('shop');
+                    }}
                     aria-expanded={shopMenuOpen}
                     className={`relative inline-flex items-center gap-1 py-1 text-xs font-medium tracking-[0.12em] uppercase whitespace-nowrap shrink-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352] ${
                       isActive
@@ -148,7 +150,7 @@ export function Navbar({
                   >
                     <span>{item.label}</span>
                     <ChevronDown className="h-3 w-3" aria-hidden="true" />
-                  </button>
+                  </a>
 
                   {shopMenuOpen && (
                     <div
@@ -160,45 +162,48 @@ export function Navbar({
                         <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8E6D35]">
                           Shop Men&apos;s Categories
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
+                        <a
+                          href="/shop"
+                          onClick={(e) => {
+                            e.preventDefault();
                             setShopMenuOpen(false);
                             onSelectCategory('All');
                           }}
                           className="text-xs font-medium text-[#141414] underline underline-offset-4"
                         >
                           View All Products
-                        </button>
+                        </a>
                       </div>
 
                       <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3">
                         {categories.map((cat) => (
                           <div key={cat.id}>
-                            <button
-                              type="button"
-                              onClick={() => {
+                            <a
+                              href={getCategoryPath(cat.id)}
+                              onClick={(e) => {
+                                e.preventDefault();
                                 setShopMenuOpen(false);
                                 onSelectCategory(cat.id);
                               }}
                               className="text-sm font-semibold text-[#141414] transition-colors hover:text-[#8E6D35]"
                             >
                               {cat.name}
-                            </button>
+                            </a>
                             {cat.subcategories.length > 0 && (
                               <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1">
                                 {cat.subcategories.map((sub) => (
-                                  <button
+                                  <a
                                     key={sub}
-                                    type="button"
-                                    onClick={() => {
+                                    href={getCategoryPath(cat.id, sub)}
+                                    onClick={(e) => {
+                                      e.preventDefault();
                                       setShopMenuOpen(false);
                                       onSelectCategory(cat.id, sub);
                                     }}
                                     className="text-[11px] text-[#5C574F] hover:text-[#141414] hover:underline"
                                   >
                                     {sub}
-                                  </button>
+                                  </a>
                                 ))}
                               </div>
                             )}
@@ -212,10 +217,13 @@ export function Navbar({
             }
 
             return (
-              <button
+              <a
                 key={item.target}
-                type="button"
-                onClick={() => handleNavClick(item.target)}
+                href={targetHref}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNavClick(item.target);
+                }}
                 className={`relative py-1 text-xs font-medium tracking-[0.12em] uppercase whitespace-nowrap shrink-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352] ${
                   isActive
                     ? 'text-[#141414] after:absolute after:right-0 after:bottom-0 after:left-0 after:h-[1.5px] after:bg-[#141414]'
@@ -223,7 +231,7 @@ export function Navbar({
                 }`}
               >
                 {item.label}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -332,9 +340,10 @@ export function Navbar({
                   <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     {quickMatches.map((item) => (
                       <li key={item.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
+                        <a
+                          href={getProductPath(item.id)}
+                          onClick={(e) => {
+                            e.preventDefault();
                             setSearchOpen(false);
                             onSelectProduct(item);
                           }}
@@ -356,7 +365,7 @@ export function Navbar({
                               {formatBdt(getEffectivePrice(item))}
                             </span>
                           </span>
-                        </button>
+                        </a>
                       </li>
                     ))}
                   </ul>
@@ -377,10 +386,13 @@ export function Navbar({
             {NAV_LINKS.map((item) => {
               const isActive = activeNav === item.target;
               return (
-                <button
+                <a
                   key={item.target}
-                  type="button"
-                  onClick={() => handleNavClick(item.target)}
+                  href={getNavTargetPath(item.target)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleNavClick(item.target);
+                  }}
                   className={`flex min-h-[46px] w-full items-center justify-between py-2.5 text-left text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
                     isActive ? 'text-[#141414]' : 'text-[#5C574F]'
                   }`}
@@ -391,7 +403,7 @@ export function Navbar({
                       Active
                     </span>
                   )}
-                </button>
+                </a>
               );
             })}
           </div>
@@ -402,17 +414,18 @@ export function Navbar({
             </p>
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               {categories.map((cat) => (
-                <button
+                <a
                   key={cat.id}
-                  type="button"
-                  onClick={() => {
+                  href={getCategoryPath(cat.id)}
+                  onClick={(e) => {
+                    e.preventDefault();
                     setMobileMenuOpen(false);
                     onSelectCategory(cat.id);
                   }}
                   className="min-h-[40px] border border-[#E3DBD0] bg-white px-3 py-2 text-left text-xs font-medium text-[#141414] hover:border-[#141414]"
                 >
                   {cat.name}
-                </button>
+                </a>
               ))}
             </div>
           </div>

@@ -3,9 +3,9 @@ import { MotionConfig, motion } from 'motion/react';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { BagDrawer, BagItem } from './components/BagDrawer';
 import { ImageWithFallback } from './components/ImageWithFallback';
-import type { InfoPageId } from './components/InfoPages';
-import { Navbar, NavTarget } from './components/Navbar';
+import { Navbar } from './components/Navbar';
 import { ProductCard } from './components/ProductCard';
+import { SharePageButton } from './components/SharePageButton';
 
 const AdminDashboardModal = lazy(() =>
   import('./components/AdminDashboardModal').then((m) => ({
@@ -81,6 +81,18 @@ import {
   StockHistoryEntry,
   StoredOrder,
 } from './utils/orders';
+import {
+  findCategoryBySlug,
+  findSubcategoryBySlug,
+  getCategoryPath,
+  getNavTargetPath,
+  getProductPath,
+  getShopPath,
+  InfoPageId,
+  NavTarget,
+  parseAppLocation,
+  ParsedAppRoute,
+} from './utils/routes';
 
 const PRODUCTS_STORAGE_KEY = 'styleon_published_products_v1';
 const LEGACY_STORAGE_KEY = 'nuvora_published_products_v3';
@@ -94,33 +106,20 @@ interface CheckoutSelection {
   returnToProductDetails: boolean;
 }
 
-type ActivePage = 'home' | 'shop' | 'contact';
 type SortOption = 'featured' | 'newest' | 'price-asc' | 'price-desc';
 
 const PAGE_SIZE = 12;
 
-function checkIsAdminRoute(): boolean {
-  if (typeof window === 'undefined') return false;
-  const p = window.location.pathname.toLowerCase();
-  return p === '/admin' || p.startsWith('/admin/');
+function readInitialRoute(): ParsedAppRoute {
+  if (typeof window === 'undefined') return { kind: 'home' };
+  return parseAppLocation(window.location.pathname, window.location.search);
 }
 
-function parseProductIdFromPath(): string | null {
-  if (typeof window === 'undefined') return null;
-  const match = window.location.pathname.match(/^\/product\/([^/]+)\/?$/i);
-  if (!match || !match[1]) return null;
-  try {
-    const decoded = decodeURIComponent(match[1]).trim();
-    return decoded || null;
-  } catch {
-    return match[1].trim() || null;
-  }
-}
-
-function pushStorefrontUrl(path: string): void {
+function pushStorefrontUrl(url: string): void {
   if (typeof window === 'undefined') return;
-  if (window.location.pathname !== path) {
-    window.history.pushState({}, '', path);
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (current !== url) {
+    window.history.pushState({}, '', url);
   }
 }
 
@@ -167,29 +166,24 @@ export default function App() {
     FLAT_DELIVERY_CHARGE_BDT,
   );
 
-  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(() =>
-    checkIsAdminRoute(),
-  );
+  const [route, setRoute] = useState<ParsedAppRoute>(() => readInitialRoute());
+  const isAdminRoute = route.kind === 'admin';
+
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [adminSessionChecking, setAdminSessionChecking] = useState<boolean>(() =>
-    checkIsAdminRoute(),
+    readInitialRoute().kind === 'admin',
   );
   const [adminLoginOpen, setAdminLoginOpen] = useState<boolean>(false);
 
-  const [activePage, setActivePage] = useState<ActivePage>('home');
-  const [activeNav, setActiveNav] = useState<NavTarget>('home');
-  const [activeInfoPage, setActiveInfoPage] = useState<InfoPageId | null>(null);
-  const [activeProductId, setActiveProductId] = useState<string | null>(() =>
-    parseProductIdFromPath(),
-  );
   const [storefrontLoaded, setStorefrontLoaded] = useState<boolean>(false);
   const [checkoutSelection, setCheckoutSelection] =
     useState<CheckoutSelection | null>(null);
 
   // Shop Filter & Sort State
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string>('All');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => {
+    const initial = readInitialRoute();
+    return initial.kind === 'shop' ? initial.searchQuery ?? '' : '';
+  });
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
   const [sortBy, setSortBy] = useState<SortOption>('featured');
@@ -293,21 +287,39 @@ export default function App() {
 
   useEffect(() => {
     const onPopState = () => {
-      const nextIsAdmin = checkIsAdminRoute();
-      setIsAdminRoute(nextIsAdmin);
-      if (!nextIsAdmin) {
+      const nextRoute = parseAppLocation(
+        window.location.pathname,
+        window.location.search,
+      );
+      setRoute(nextRoute);
+      setCheckoutSelection(null);
+      if (nextRoute.kind === 'shop') {
+        setSearchQuery(nextRoute.searchQuery ?? '');
+        setVisibleLimit(PAGE_SIZE);
+      } else if (nextRoute.kind === 'category') {
+        setSearchQuery('');
+        setVisibleLimit(PAGE_SIZE);
+      }
+      if (nextRoute.kind !== 'admin') {
         setAdminOpen(false);
         setAdminLoginOpen(false);
-        const nextProductId = parseProductIdFromPath();
-        setActiveProductId(nextProductId);
-        setCheckoutSelection(null);
-        setActiveInfoPage(null);
         void loadStorefront();
       }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, [loadStorefront]);
+
+  useEffect(() => {
+    if (route.kind !== 'new-arrivals') return;
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById('new-arrivals');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [route.kind]);
 
   // Persist published catalog & categories cache in localStorage
   useEffect(() => {
@@ -392,13 +404,46 @@ export default function App() {
     [publishedProducts],
   );
 
-  const activeCategoryDef = useMemo(
-    () => categories.find((c) => c.id === selectedCategory) ?? null,
-    [categories, selectedCategory],
+  const matchedRouteCategory = useMemo(
+    () =>
+      route.kind === 'category'
+        ? findCategoryBySlug(categories, route.categorySlug)
+        : null,
+    [categories, route],
   );
 
+  const selectedCategory =
+    route.kind === 'category' ? matchedRouteCategory?.id ?? 'All' : 'All';
+
+  const selectedSubcategory = useMemo(() => {
+    if (route.kind !== 'category' || !matchedRouteCategory) return 'All';
+    if (!route.subcategorySlug) return 'All';
+    return (
+      findSubcategoryBySlug(matchedRouteCategory, route.subcategorySlug) ?? 'All'
+    );
+  }, [matchedRouteCategory, route]);
+
+  const activeCategoryDef =
+    route.kind === 'category' ? matchedRouteCategory : null;
+
+  const activeProductId = route.kind === 'product' ? route.productId : null;
+  const activeInfoPage: InfoPageId | null =
+    route.kind === 'info' ? route.page : null;
+
+  const activeNav: NavTarget | null = useMemo(() => {
+    if (route.kind === 'home') return 'home';
+    if (route.kind === 'new-arrivals') return 'new-arrivals';
+    if (route.kind === 'shop' || route.kind === 'category') return 'shop';
+    if (route.kind === 'contact') return 'contact';
+    if (route.kind === 'info') return route.page;
+    return null;
+  }, [route]);
+
   const activeProduct = useMemo(
-    () => publishedProducts.find((p) => p.id === activeProductId) ?? null,
+    () =>
+      activeProductId
+        ? publishedProducts.find((p) => p.id === activeProductId) ?? null
+        : null,
     [publishedProducts, activeProductId],
   );
 
@@ -495,115 +540,103 @@ export default function App() {
   useEffect(() => {
     if (checkoutProduct) {
       document.title = `Checkout: ${checkoutProduct.name} — STYLEON`;
-    } else if (activeProduct) {
-      document.title = `${activeProduct.name} — STYLEON`;
-    } else if (activeInfoPage) {
+    } else if (route.kind === 'admin') {
+      document.title = 'Admin Dashboard — STYLEON';
+    } else if (route.kind === 'product') {
+      document.title = activeProduct
+        ? `${activeProduct.name} — STYLEON`
+        : storefrontLoaded
+          ? 'Product Not Found — STYLEON'
+          : 'Loading Product — STYLEON';
+    } else if (route.kind === 'not-found') {
+      document.title = 'Page Not Found — STYLEON';
+    } else if (route.kind === 'category') {
+      if (!matchedRouteCategory) {
+        document.title = storefrontLoaded
+          ? 'Page Not Found — STYLEON'
+          : 'STYLEON';
+      } else if (selectedSubcategory !== 'All') {
+        document.title = `${matchedRouteCategory.name} — ${selectedSubcategory} — STYLEON`;
+      } else {
+        document.title = `${matchedRouteCategory.name} — STYLEON`;
+      }
+    } else if (route.kind === 'shop') {
+      document.title = "Shop Men's Collection — STYLEON";
+    } else if (route.kind === 'new-arrivals') {
+      document.title = 'New Arrivals — STYLEON';
+    } else if (route.kind === 'contact') {
+      document.title = 'Contact — STYLEON';
+    } else if (route.kind === 'info') {
       const titles: Record<InfoPageId, string> = {
+        about: 'About Us — STYLEON',
         delivery: 'Shipping Policy — STYLEON',
         returns: 'Return & Refund Policy — STYLEON',
         privacy: 'Privacy Policy — STYLEON',
         terms: 'Terms & Conditions — STYLEON',
       };
-      document.title = titles[activeInfoPage];
-    } else if (activePage === 'shop') {
-      document.title =
-        selectedCategory === 'All'
-          ? "Shop Men's Collection — STYLEON"
-          : `${selectedCategory} — STYLEON`;
-    } else if (activePage === 'contact') {
-      document.title = 'Contact — STYLEON';
+      document.title = titles[route.page];
     } else {
       document.title = "STYLEON — Premium Men's Fashion & Clothing";
     }
   }, [
     checkoutProduct,
+    route,
     activeProduct,
-    activeInfoPage,
-    activePage,
-    selectedCategory,
+    storefrontLoaded,
+    matchedRouteCategory,
+    selectedSubcategory,
   ]);
+
+  const navigateToUrl = useCallback(
+    (url: string, opts?: { scrollTop?: boolean }) => {
+      pushStorefrontUrl(url);
+      const parsedUrl = new URL(url, 'http://styleon.local');
+      setRoute(parseAppLocation(parsedUrl.pathname, parsedUrl.search));
+      setCheckoutSelection(null);
+      if (opts?.scrollTop !== false) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [],
+  );
 
   const openShopWithCategory = (
     categoryId: string,
     subcategory = 'All',
-    navHighlight: NavTarget = 'shop',
   ) => {
-    pushStorefrontUrl('/');
-    setActiveProductId(null);
-    setCheckoutSelection(null);
-    setActiveInfoPage(null);
-    setSelectedCategory(categoryId);
-    setSelectedSubcategory(subcategory);
     setVisibleLimit(PAGE_SIZE);
-    setActivePage('shop');
-    setActiveNav(navHighlight);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (categoryId === 'All') {
+      setSearchQuery('');
+      navigateToUrl('/shop');
+      return;
+    }
+    setSearchQuery('');
+    navigateToUrl(getCategoryPath(categoryId, subcategory));
   };
 
   const handleNavigate = (target: NavTarget) => {
-    pushStorefrontUrl('/');
-    setActiveNav(target);
-    setActiveProductId(null);
-    setCheckoutSelection(null);
-
-    if (
-      target === 'privacy' ||
-      target === 'returns' ||
-      target === 'delivery' ||
-      target === 'terms'
-    ) {
-      setActiveInfoPage(target);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-
-    setActiveInfoPage(null);
-
+    const targetUrl = getNavTargetPath(target);
     if (target === 'shop') {
-      openShopWithCategory('All', 'All', 'shop');
+      setSearchQuery('');
+      setVisibleLimit(PAGE_SIZE);
+      navigateToUrl(targetUrl);
       return;
     }
-
     if (target === 'new-arrivals') {
-      setActivePage('home');
-      window.setTimeout(() => {
-        const el = document.getElementById('new-arrivals');
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 60);
+      navigateToUrl(targetUrl, { scrollTop: false });
       return;
     }
-
-    if (target === 'contact') {
-      setActivePage('contact');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      return;
-    }
-
-    setActivePage('home');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    navigateToUrl(targetUrl);
   };
 
   const handleSubmitSearch = (query: string) => {
-    pushStorefrontUrl('/');
     setSearchQuery(query);
-    setActiveProductId(null);
-    setCheckoutSelection(null);
-    setActiveInfoPage(null);
-    setSelectedCategory('All');
-    setSelectedSubcategory('All');
     setVisibleLimit(PAGE_SIZE);
-    setActivePage('shop');
-    setActiveNav('shop');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    navigateToUrl(getShopPath(query));
   };
 
   const handleSelectProduct = (product: Product) => {
-    pushStorefrontUrl(`/product/${encodeURIComponent(product.id)}`);
-    setActiveInfoPage(null);
-    setCheckoutSelection(null);
-    setActiveProductId(product.id);
+    navigateToUrl(getProductPath(product.id));
   };
 
   const handleAddToBag = (
@@ -631,9 +664,6 @@ export default function App() {
   };
 
   const handleOrderFromCard = (product: Product) => {
-    pushStorefrontUrl('/');
-    setActiveInfoPage(null);
-    setActiveProductId(null);
     setCheckoutSelection({
       productId: product.id,
       returnToProductDetails: false,
@@ -646,7 +676,6 @@ export default function App() {
     color: string,
     quantity: number,
   ) => {
-    setActiveInfoPage(null);
     setCheckoutSelection({
       productId: product.id,
       size,
@@ -741,10 +770,8 @@ export default function App() {
   }, [loadStorefront]);
 
   const handleReturnToStorefront = useCallback(() => {
-    if (window.location.pathname !== '/') {
-      window.history.pushState({}, '', '/');
-    }
-    setIsAdminRoute(false);
+    pushStorefrontUrl('/');
+    setRoute({ kind: 'home' });
     setAdminOpen(false);
     setAdminLoginOpen(false);
     void loadStorefront();
@@ -799,9 +826,6 @@ export default function App() {
       try {
         const res = await deleteAdminProduct(productId);
         setProducts(res.products.map(normalizeProduct));
-        if (activeProductId === productId) {
-          setActiveProductId(null);
-        }
       } catch (err) {
         if (err instanceof AdminApiError && err.status === 401) {
           handleAdminUnauthorized();
@@ -974,13 +998,12 @@ export default function App() {
   };
 
   const clearShopFilters = () => {
-    setSelectedCategory('All');
-    setSelectedSubcategory('All');
     setSearchQuery('');
     setMinPrice('');
     setMaxPrice('');
     setSortBy('featured');
     setVisibleLimit(PAGE_SIZE);
+    navigateToUrl('/shop');
   };
 
   // Protected Direct /admin URL Gate
@@ -1092,12 +1115,7 @@ export default function App() {
                 }}
                 onContinueShopping={() => {
                   void loadStorefront();
-                  pushStorefrontUrl('/');
-                  setCheckoutSelection(null);
-                  setActiveProductId(null);
-                  setActivePage('shop');
-                  setActiveNav('shop');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  navigateToUrl('/shop');
                 }}
                 onBack={() => {
                   refreshOrders();
@@ -1105,10 +1123,7 @@ export default function App() {
                   const prodId = checkoutProduct.id;
                   setCheckoutSelection(null);
                   if (returnToDetails) {
-                    pushStorefrontUrl(`/product/${encodeURIComponent(prodId)}`);
-                    setActiveProductId(prodId);
-                  } else {
-                    pushStorefrontUrl('/');
+                    navigateToUrl(getProductPath(prodId), { scrollTop: false });
                   }
                 }}
               />
@@ -1125,12 +1140,7 @@ export default function App() {
                 product={activeProduct}
                 deliveryChargeBdt={deliveryChargeBdt}
                 relatedProducts={relatedProducts}
-                onBack={() => {
-                  pushStorefrontUrl('/');
-                  setActiveProductId(null);
-                  setActivePage('shop');
-                  setActiveNav('shop');
-                }}
+                onBack={() => navigateToUrl('/shop')}
                 onSelectProduct={handleSelectProduct}
                 onStartCheckout={handleStartCheckoutFromDetails}
                 onOrderProduct={handleOrderFromCard}
@@ -1173,6 +1183,44 @@ export default function App() {
                 Loading Product Details...
               </div>
             )
+          ) : route.kind === 'not-found' ||
+            (route.kind === 'category' && !matchedRouteCategory) ? (
+            route.kind === 'category' && !storefrontLoaded ? (
+              <div className="flex min-h-[50vh] items-center justify-center bg-[#FAF8F4] text-xs font-medium uppercase tracking-[0.16em] text-[#5C574F]">
+                Loading Collection...
+              </div>
+            ) : (
+              <section className="bg-[#FAF8F4] py-16 md:py-24">
+                <div className="mx-auto max-w-[640px] border border-[#E3DBD0] bg-white px-6 py-12 text-center sm:px-10">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-[#8E6D35]">
+                    404 · STYLEON Storefront
+                  </p>
+                  <h1 className="font-display mt-3 text-3xl font-semibold text-[#141414] sm:text-4xl">
+                    Page Not Found
+                  </h1>
+                  <p className="mt-3 text-sm leading-relaxed text-[#5C574F]">
+                    The page or category you requested does not exist or may
+                    have moved.
+                  </p>
+                  <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate('home')}
+                      className="inline-flex min-h-[46px] items-center justify-center bg-[#141414] px-7 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[#FAF8F4] transition-colors hover:bg-[#2A2825] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+                    >
+                      Return to Homepage
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openShopWithCategory('All')}
+                      className="inline-flex min-h-[46px] items-center justify-center border border-[#141414] bg-white px-6 py-3 text-xs font-medium uppercase tracking-[0.14em] text-[#141414] transition-colors hover:bg-[#EFE9DF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+                    >
+                      Browse Shop
+                    </button>
+                  </div>
+                </div>
+              </section>
+            )
           ) : activeInfoPage ? (
             <Suspense
               fallback={
@@ -1188,7 +1236,7 @@ export default function App() {
                 onNavigate={handleNavigate}
               />
             </Suspense>
-          ) : activePage === 'contact' ? (
+          ) : route.kind === 'contact' ? (
             <Suspense
               fallback={
                 <div className="flex min-h-[40vh] items-center justify-center bg-[#FAF8F4] text-xs font-medium uppercase tracking-[0.16em] text-[#5C574F]">
@@ -1198,7 +1246,7 @@ export default function App() {
             >
               <ContactSection onBackHome={() => handleNavigate('home')} />
             </Suspense>
-          ) : activePage === 'shop' ? (
+          ) : route.kind === 'shop' || route.kind === 'category' ? (
             <section className="bg-[#FAF8F4] py-10 md:py-16">
               <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-10">
                 {/* Shop Header */}
@@ -1222,27 +1270,37 @@ export default function App() {
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleRequestAdminAccess();
-                    }}
-                    className="inline-flex min-h-[42px] items-center gap-2 border border-[#141414] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#141414] transition-colors hover:bg-[#141414] hover:text-[#FAF8F4]"
-                  >
-                    <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                    <span>Admin Dashboard</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <SharePageButton
+                      label={
+                        selectedCategory === 'All'
+                          ? 'Share Shop'
+                          : 'Share Category'
+                      }
+                      copiedMessage={
+                        selectedCategory === 'All'
+                          ? 'Shop link copied to clipboard!'
+                          : 'Category link copied to clipboard!'
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleRequestAdminAccess();
+                      }}
+                      className="inline-flex min-h-[42px] items-center gap-2 border border-[#141414] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#141414] transition-colors hover:bg-[#141414] hover:text-[#FAF8F4]"
+                    >
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                      <span>Admin Dashboard</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Image-based Category Strip */}
                 <div className="mt-6 flex gap-3 overflow-x-auto pb-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedCategory('All');
-                      setSelectedSubcategory('All');
-                      setVisibleLimit(PAGE_SIZE);
-                    }}
+                    onClick={() => openShopWithCategory('All')}
                     className={`flex min-w-[88px] shrink-0 flex-col justify-center border px-3.5 py-2.5 text-left transition-colors sm:min-w-[100px] sm:px-4 sm:py-3 ${
                       selectedCategory === 'All'
                         ? 'border-[#141414] bg-[#141414] text-[#FAF8F4]'
@@ -1269,11 +1327,7 @@ export default function App() {
                       <button
                         key={cat.id}
                         type="button"
-                        onClick={() => {
-                          setSelectedCategory(cat.id);
-                          setSelectedSubcategory('All');
-                          setVisibleLimit(PAGE_SIZE);
-                        }}
+                        onClick={() => openShopWithCategory(cat.id)}
                         className={`flex w-[124px] shrink-0 items-center gap-2 border p-2 text-left transition-colors sm:w-[132px] sm:gap-2.5 ${
                           active
                             ? 'border-[#141414] bg-[#141414] text-[#FAF8F4]'
@@ -1305,10 +1359,9 @@ export default function App() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => {
-                          setSelectedSubcategory('All');
-                          setVisibleLimit(PAGE_SIZE);
-                        }}
+                        onClick={() =>
+                          openShopWithCategory(activeCategoryDef.id, 'All')
+                        }
                         className={`min-h-[34px] border px-3 text-xs font-medium transition-colors ${
                           selectedSubcategory === 'All'
                             ? 'border-[#141414] bg-[#141414] text-[#FAF8F4]'
@@ -1323,10 +1376,9 @@ export default function App() {
                           <button
                             key={sub}
                             type="button"
-                            onClick={() => {
-                              setSelectedSubcategory(sub);
-                              setVisibleLimit(PAGE_SIZE);
-                            }}
+                            onClick={() =>
+                              openShopWithCategory(activeCategoryDef.id, sub)
+                            }
                             className={`min-h-[34px] border px-3 text-xs font-medium transition-colors ${
                               subActive
                                 ? 'border-[#141414] bg-[#141414] text-[#FAF8F4]'
@@ -1748,31 +1800,64 @@ export default function App() {
                 </h3>
                 <ul className="mt-4 space-y-2.5 text-sm text-[#D6CFC4]">
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('home')}
+                    <a
+                      href={getNavTargetPath('home')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('home');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Home
-                    </button>
+                    </a>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('shop')}
+                    <a
+                      href={getNavTargetPath('shop')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('shop');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Shop
-                    </button>
+                    </a>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('contact')}
+                    <a
+                      href={getNavTargetPath('new-arrivals')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('new-arrivals');
+                      }}
+                      className="transition-colors hover:text-white"
+                    >
+                      New Arrivals
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href={getNavTargetPath('about')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('about');
+                      }}
+                      className="transition-colors hover:text-white"
+                    >
+                      About Us
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href={getNavTargetPath('contact')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('contact');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Contact
-                    </button>
+                    </a>
                   </li>
                 </ul>
               </div>
@@ -1783,31 +1868,52 @@ export default function App() {
                 </h3>
                 <ul className="mt-4 space-y-2.5 text-sm text-[#D6CFC4]">
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('privacy')}
+                    <a
+                      href={getNavTargetPath('privacy')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('privacy');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Privacy Policy
-                    </button>
+                    </a>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('delivery')}
+                    <a
+                      href={getNavTargetPath('delivery')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('delivery');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Shipping Policy
-                    </button>
+                    </a>
                   </li>
                   <li>
-                    <button
-                      type="button"
-                      onClick={() => handleNavigate('returns')}
+                    <a
+                      href={getNavTargetPath('returns')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('returns');
+                      }}
                       className="transition-colors hover:text-white"
                     >
                       Return &amp; Refund Policy
-                    </button>
+                    </a>
+                  </li>
+                  <li>
+                    <a
+                      href={getNavTargetPath('terms')}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNavigate('terms');
+                      }}
+                      className="transition-colors hover:text-white"
+                    >
+                      Terms &amp; Conditions
+                    </a>
                   </li>
                   <li>
                     <button

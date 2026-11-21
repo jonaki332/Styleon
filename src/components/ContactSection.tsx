@@ -1,6 +1,7 @@
 import { ArrowLeft, Check, Copy, Mail, MapPin, MessageCircle } from 'lucide-react';
 import { useState } from 'react';
 import { buildWhatsAppUrl, STORE_CONFIG } from '../data/catalog';
+import { SharePageButton } from './SharePageButton';
 
 interface ContactSectionProps {
   onBackHome?: () => void;
@@ -70,16 +71,22 @@ export function ContactSection({ onBackHome }: ContactSectionProps) {
       className="bg-[#FAF8F4] py-10 md:py-16"
     >
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-10">
-        {onBackHome && (
-          <button
-            type="button"
-            onClick={onBackHome}
-            className="mb-6 inline-flex min-h-[42px] items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#5C574F] transition-colors hover:text-[#141414]"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            <span>Back to Home</span>
-          </button>
-        )}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          {onBackHome ? (
+            <button
+              type="button"
+              onClick={onBackHome}
+              className="inline-flex min-h-[42px] items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#5C574F] transition-colors hover:text-[#141414]"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <span>Back to Home</span>
+            </button>
+          ) : (
+            <span />
+          )}
+
+          <SharePageButton label="Share Page" />
+        </div>
 
         <div className="grid gap-8 lg:grid-cols-12 lg:items-stretch lg:gap-10">
           {/* Left Column: Contact Information & WhatsApp */}
