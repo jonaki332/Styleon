@@ -105,6 +105,25 @@ function checkIsAdminRoute(): boolean {
   return p === '/admin' || p.startsWith('/admin/');
 }
 
+function parseProductIdFromPath(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/product\/([^/]+)\/?$/i);
+  if (!match || !match[1]) return null;
+  try {
+    const decoded = decodeURIComponent(match[1]).trim();
+    return decoded || null;
+  } catch {
+    return match[1].trim() || null;
+  }
+}
+
+function pushStorefrontUrl(path: string): void {
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname !== path) {
+    window.history.pushState({}, '', path);
+  }
+}
+
 function loadStoredProducts(): Product[] {
   try {
     const raw =
@@ -160,7 +179,10 @@ export default function App() {
   const [activePage, setActivePage] = useState<ActivePage>('home');
   const [activeNav, setActiveNav] = useState<NavTarget>('home');
   const [activeInfoPage, setActiveInfoPage] = useState<InfoPageId | null>(null);
-  const [activeProductId, setActiveProductId] = useState<string | null>(null);
+  const [activeProductId, setActiveProductId] = useState<string | null>(() =>
+    parseProductIdFromPath(),
+  );
+  const [storefrontLoaded, setStorefrontLoaded] = useState<boolean>(false);
   const [checkoutSelection, setCheckoutSelection] =
     useState<CheckoutSelection | null>(null);
 
@@ -197,6 +219,8 @@ export default function App() {
       }
     } catch {
       // Preserve local defaults if backend is unavailable
+    } finally {
+      setStorefrontLoaded(true);
     }
   }, []);
 
@@ -274,6 +298,10 @@ export default function App() {
       if (!nextIsAdmin) {
         setAdminOpen(false);
         setAdminLoginOpen(false);
+        const nextProductId = parseProductIdFromPath();
+        setActiveProductId(nextProductId);
+        setCheckoutSelection(null);
+        setActiveInfoPage(null);
         void loadStorefront();
       }
     };
@@ -500,6 +528,7 @@ export default function App() {
     subcategory = 'All',
     navHighlight: NavTarget = 'shop',
   ) => {
+    pushStorefrontUrl('/');
     setActiveProductId(null);
     setCheckoutSelection(null);
     setActiveInfoPage(null);
@@ -512,6 +541,7 @@ export default function App() {
   };
 
   const handleNavigate = (target: NavTarget) => {
+    pushStorefrontUrl('/');
     setActiveNav(target);
     setActiveProductId(null);
     setCheckoutSelection(null);
@@ -556,6 +586,7 @@ export default function App() {
   };
 
   const handleSubmitSearch = (query: string) => {
+    pushStorefrontUrl('/');
     setSearchQuery(query);
     setActiveProductId(null);
     setCheckoutSelection(null);
@@ -569,6 +600,7 @@ export default function App() {
   };
 
   const handleSelectProduct = (product: Product) => {
+    pushStorefrontUrl(`/product/${encodeURIComponent(product.id)}`);
     setActiveInfoPage(null);
     setCheckoutSelection(null);
     setActiveProductId(product.id);
@@ -599,6 +631,7 @@ export default function App() {
   };
 
   const handleOrderFromCard = (product: Product) => {
+    pushStorefrontUrl('/');
     setActiveInfoPage(null);
     setActiveProductId(null);
     setCheckoutSelection({
@@ -1059,6 +1092,7 @@ export default function App() {
                 }}
                 onContinueShopping={() => {
                   void loadStorefront();
+                  pushStorefrontUrl('/');
                   setCheckoutSelection(null);
                   setActiveProductId(null);
                   setActivePage('shop');
@@ -1071,7 +1105,10 @@ export default function App() {
                   const prodId = checkoutProduct.id;
                   setCheckoutSelection(null);
                   if (returnToDetails) {
+                    pushStorefrontUrl(`/product/${encodeURIComponent(prodId)}`);
                     setActiveProductId(prodId);
+                  } else {
+                    pushStorefrontUrl('/');
                   }
                 }}
               />
@@ -1089,6 +1126,7 @@ export default function App() {
                 deliveryChargeBdt={deliveryChargeBdt}
                 relatedProducts={relatedProducts}
                 onBack={() => {
+                  pushStorefrontUrl('/');
                   setActiveProductId(null);
                   setActivePage('shop');
                   setActiveNav('shop');
@@ -1099,6 +1137,42 @@ export default function App() {
                 onAddToBag={handleAddToBag}
               />
             </Suspense>
+          ) : activeProductId ? (
+            storefrontLoaded ? (
+              <section className="bg-[#FAF8F4] py-16 md:py-24">
+                <div className="mx-auto max-w-[640px] border border-[#E3DBD0] bg-white px-6 py-12 text-center sm:px-10">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-[#8E6D35]">
+                    STYLEON Storefront
+                  </p>
+                  <h1 className="font-display mt-3 text-3xl font-semibold text-[#141414] sm:text-4xl">
+                    Product Not Found
+                  </h1>
+                  <p className="mt-3 text-sm leading-relaxed text-[#5C574F]">
+                    The product you are looking for is unavailable or the link may have changed.
+                  </p>
+                  <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate('home')}
+                      className="inline-flex min-h-[46px] items-center justify-center bg-[#141414] px-7 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[#FAF8F4] transition-colors hover:bg-[#2A2825] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+                    >
+                      Return to Homepage
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openShopWithCategory('All')}
+                      className="inline-flex min-h-[46px] items-center justify-center border border-[#141414] bg-white px-6 py-3 text-xs font-medium uppercase tracking-[0.14em] text-[#141414] transition-colors hover:bg-[#EFE9DF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+                    >
+                      Browse Shop
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <div className="flex min-h-[50vh] items-center justify-center bg-[#FAF8F4] text-xs font-medium uppercase tracking-[0.16em] text-[#5C574F]">
+                Loading Product Details...
+              </div>
+            )
           ) : activeInfoPage ? (
             <Suspense
               fallback={

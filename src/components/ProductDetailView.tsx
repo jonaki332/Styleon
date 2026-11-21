@@ -1,4 +1,4 @@
-import { ArrowLeft, Minus, Plus, ShoppingBag, Truck } from 'lucide-react';
+import { ArrowLeft, Check, Minus, Plus, Share2, ShoppingBag, Truck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   FLAT_DELIVERY_CHARGE_BDT,
@@ -52,6 +52,7 @@ export function ProductDetailView({
   );
   const [quantity, setQuantity] = useState(1);
   const [addedFeedback, setAddedFeedback] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<'idle' | 'copied' | 'error'>('idle');
 
   useEffect(() => {
     setActiveImageIndex(0);
@@ -61,6 +62,7 @@ export function ProductDetailView({
         (product.images.length > 1 ? 'Photo #1' : 'As Shown'),
     );
     setQuantity(1);
+    setShareFeedback('idle');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [product]);
 
@@ -88,17 +90,92 @@ export function ProductDetailView({
     window.setTimeout(() => setAddedFeedback(false), 1500);
   };
 
+  const handleShareProduct = async () => {
+    const shareUrl = `${window.location.origin}/product/${encodeURIComponent(product.id)}`;
+    let copied = false;
+
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    if (!copied) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = shareUrl;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        copied = document.execCommand('copy');
+        document.body.removeChild(textarea);
+      } catch {
+        copied = false;
+      }
+    }
+
+    setShareFeedback(copied ? 'copied' : 'error');
+    window.setTimeout(() => setShareFeedback('idle'), 2800);
+  };
+
   return (
     <section className="bg-[#FAF8F4] py-8 md:py-14">
       <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-10">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex min-h-[42px] items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#5C574F] transition-colors hover:text-[#141414] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          <span>Back to Shop</span>
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex min-h-[42px] items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#5C574F] transition-colors hover:text-[#141414] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <span>Back to Shop</span>
+          </button>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {shareFeedback === 'copied' && (
+              <span
+                role="status"
+                aria-live="polite"
+                className="text-xs font-medium text-[#15803D]"
+              >
+                Product link copied to clipboard!
+              </span>
+            )}
+            {shareFeedback === 'error' && (
+              <span
+                role="status"
+                aria-live="polite"
+                className="text-xs font-medium text-[#9B2C2C]"
+              >
+                Could not copy link automatically. Copy from the address bar.
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                void handleShareProduct();
+              }}
+              className="inline-flex min-h-[40px] items-center gap-2 border border-[#E3DBD0] bg-white px-4 py-2 text-xs font-medium uppercase tracking-[0.12em] text-[#141414] transition-colors hover:border-[#141414] hover:bg-[#EFE9DF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89352]"
+            >
+              {shareFeedback === 'copied' ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-[#15803D]" aria-hidden="true" />
+                  <span>Link Copied</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Share Product</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
 
         <div className="mt-6 grid gap-8 lg:grid-cols-12 lg:items-start lg:gap-12">
           {/* Left Column: Large Product Gallery */}
